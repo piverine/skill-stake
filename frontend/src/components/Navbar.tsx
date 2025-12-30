@@ -4,8 +4,13 @@ import Link from 'next/link'
 import { WalletConnect } from './WalletConnect'
 import { UserButton, useUser } from '@clerk/nextjs'
 
+import { usePathname } from 'next/navigation'
+
 export default function Navbar() {
     const { isLoaded, isSignedIn } = useUser()
+    const pathname = usePathname()
+
+    if (pathname === '/') return null
 
     return (
         <nav className="bg-white shadow">
