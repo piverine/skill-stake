@@ -1,6 +1,9 @@
 # Skill-Stake Learning Platform
 
 A blockchain-incentivized learning verification platform that combines AI-powered quiz generation with cryptocurrency staking to create accountability in learning.
+## 🌐 Links:
+[![Youtube](https://img.shields.io/badge/Youtube-%23E4405F.svg?logo=Youtube&logoColor=white)](https://youtu.be/GLLPoS7QFms) [![LinkedIn](https://img.shields.io/badge/LinkedIn-%230077B5.svg?logo=linkedin&logoColor=white)](https://www.linkedin.com/posts/rohan-kumar-3288671a7_hackxios2k25-kiroide-aws-activity-7411821294603739136-fcLr?utm_source=share&utm_medium=member_desktop&rcm=ACoAAEaO-fwB_zRQlgznfXDeL5BeWi6WGC2dBx0) [![Blog](https://img.shields.io/badge/Blog-black.svg?logo=Blog&logoColor=white)](https://medium.com/@darkgods173/web3-meets-edtech-how-i-used-kiro-gemini-to-gamify-learning-334ca19be1c3)
+[![Documentation](https://img.shields.io/badge/Documentation-Blue.svg?logo=Blog&logoColor=white)](https://docs.google.com/document/d/10a6mlKO0SUI7eGGiPCVZeZNBIUHGb_7zWNmUCniNju4/edit?usp=sharing)
 
 ## Architecture
 
@@ -123,11 +126,9 @@ The platform uses PostgreSQL with the following main tables:
 8. **Task 8**: Error handling and validation
 9. **Task 9**: Integration and testing
 
-## Links
 
-- LinkedIn post: https://www.linkedin.com/posts/rohan-kumar-3288671a7_hackxios2k25-kiroide-aws-activity-7411821294603739136-fcLr/
-- Blog post: https://medium.com/@darkgods173/web3-meets-edtech-how-i-used-kiro-gemini-to-gamify-learning-334ca19be1c3
 
 ## Contributing
+
 
 This project follows the spec-driven development methodology. See `.kiro/specs/skill-stake-learning/` for detailed requirements, design, and implementation tasks.
