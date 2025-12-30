@@ -27,7 +27,13 @@ class CRUDQuiz(CRUDBase[Quiz, QuizCreate, dict]):
     def get_by_user_id(self, db: Session, *, user_id: str, skip: int = 0, limit: int = 100) -> List[Quiz]:
         """Get all quizzes for a specific user through stakes."""
         from app.models.stake import Stake
-        return (
+        logger.info(f"Fetching quizzes for user_id: {user_id} (Type: {type(user_id)})")
+        
+        # Debug: Check if any stakes exist for this user
+        stake_count = db.query(Stake).filter(Stake.user_id == user_id).count()
+        logger.info(f"Found {stake_count} stakes for user {user_id}")
+        
+        quizzes = (
             db.query(Quiz)
             .join(Stake, Quiz.stake_id == Stake.stake_id)
             .filter(Stake.user_id == user_id)
@@ -35,6 +41,8 @@ class CRUDQuiz(CRUDBase[Quiz, QuizCreate, dict]):
             .limit(limit)
             .all()
         )
+        logger.info(f"Found {len(quizzes)} quizzes for user {user_id}")
+        return quizzes
 
     def create_quiz(self, db: Session, *, quiz_data: GeneratedQuiz, stake_id: str) -> Quiz:
         """Create a new quiz from generated quiz data with comprehensive validation."""

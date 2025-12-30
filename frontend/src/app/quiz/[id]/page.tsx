@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { useAccount, useWriteContract, useReadContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useAccount, useWriteContract, useReadContract, useWaitForTransactionReceipt, useBalance } from 'wagmi';
 import { parseEther, keccak256, toHex } from 'viem';
 import { WalletConnect } from '@/components/WalletConnect';
 import axios from 'axios';
@@ -23,17 +23,32 @@ const CONTRACT_ABI = [
         "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
         "stateMutability": "view",
         "type": "function"
+    },
+    {
+        "inputs": [
+            { "internalType": "bytes32", "name": "quizId", "type": "bytes32" },
+            { "internalType": "bytes", "name": "signature", "type": "bytes" }
+        ],
+        "name": "withdraw",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
     }
 ];
 
 // Replace with deployed address (Dummy for now)
-const CONTRACT_ADDRESS = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+const CONTRACT_ADDRESS = "0x0DCd1Bf9A1b36cE34237eEaFef220932846BCD82";
 
 export default function QuizPage() {
     const params = useParams();
     const quizId = params.id as string;
-    const { address, isConnected } = useAccount();
+    const { address, isConnected, chainId } = useAccount(); // Add chainId here
     const { getToken, isLoaded, isSignedIn } = useAuth();
+
+    // Debugging: Contract Balance
+    const { data: contractBalance } = useBalance({
+        address: CONTRACT_ADDRESS,
+    });
 
     const [quiz, setQuiz] = useState<any>(null);
     const [loading, setLoading] = useState(true);
@@ -45,16 +60,19 @@ export default function QuizPage() {
         setMounted(true);
     }, []);
 
+    const [localStakeSuccess, setLocalStakeSuccess] = useState(false);
+
     // Wagmi Hooks
-    const { writeContract, data: hash, isPending: isStaking } = useWriteContract();
-    const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash });
+    const [txHash, setTxHash] = useState<`0x${string}` | undefined>(undefined);
+    const [txType, setTxType] = useState<'STAKE' | 'CLAIM' | null>(null);
+    const { writeContractAsync, isPending } = useWriteContract();
+    const { isLoading: isConfirming, isSuccess: isConfirmed, data: receipt } = useWaitForTransactionReceipt({ hash: txHash });
 
     // Convert quiz UUID string to bytes32 for contract using keccak256 hash
-    // UUID string is too long for bytes32 direct conversion
     const quizIdBytes32 = keccak256(toHex(quizId));
 
     // Check if user has staked
-    const { data: hasStakedOnChain } = useReadContract({
+    const { data: hasStakedOnChain, refetch: refetchStakeStatus } = useReadContract({
         address: CONTRACT_ADDRESS,
         abi: CONTRACT_ABI,
         functionName: 'hasStaked',
@@ -62,48 +80,48 @@ export default function QuizPage() {
     });
 
     useEffect(() => {
-        console.log("Staked on chain?", hasStakedOnChain);
-    }, [hasStakedOnChain]);
+        if (isConfirmed && receipt) {
+            if (receipt.status === 'reverted') {
+                alert("Transaction Failed! The contract reverted the transaction.");
+                setTxType(null);
+                setTxHash(undefined);
+                return;
+            }
+
+            // Refetch stake status to update UI immediately
+            refetchStakeStatus();
+
+            if (txType === 'CLAIM') {
+                alert("Success! Stake claimed successfully (0.001 ETH refunded).");
+                window.location.href = '/dashboard';
+            } else if (txType === 'STAKE') {
+                console.log("Staking confirmed, starting quiz...");
+                refetchStakeStatus(); // Ensure we refetch again
+                setLocalStakeSuccess(true);
+            }
+            // Reset types
+            setTxType(null);
+            setTxHash(undefined);
+        }
+    }, [isConfirmed, receipt, txHash, refetchStakeStatus, txType]);
 
     useEffect(() => {
         if (!isLoaded) return;
 
-        console.log("QuizPage mounted. ID:", quizId);
-
-        // Fetch Quiz Data
         const fetchQuiz = async () => {
-            console.log("Starting fetchQuiz...");
-            // Add a timeout to prevent infinite hanging
-            const timeoutId = setTimeout(() => {
-                if (loading) {
-                    console.error("Fetch timed out");
-                    setLoading(false);
-                    // could set an error state here
-                }
-            }, 10000);
-
             try {
                 if (!isSignedIn) {
-                    console.warn("User not signed in, skipping fetch");
                     setLoading(false);
                     return;
                 }
-
-                console.log("Getting token...");
                 const token = await getToken();
-                console.log("Token received:", token ? "YES" : "NO");
-
-                console.log("Fetching quiz from API...");
                 const res = await axios.get(`http://localhost:8000/api/v1/quiz/${quizId}`, {
                     headers: { Authorization: `Bearer ${token}` }
                 });
-                console.log("Quiz data received:", res.data);
                 setQuiz(res.data);
             } catch (err) {
                 console.error("Failed to load quiz", err);
             } finally {
-                clearTimeout(timeoutId);
-                console.log("Setting loading false");
                 setLoading(false);
             }
         };
@@ -111,65 +129,58 @@ export default function QuizPage() {
         if (quizId) {
             fetchQuiz();
         } else {
-            console.warn("No quizId found in params:", params);
             setLoading(false);
         }
-    }, [quizId, getToken, params, isLoaded, isSignedIn]);
+    }, [quizId, isLoaded, isSignedIn]); // Stable dependencies
 
-    useEffect(() => {
-        // ... previous useEffect logic
-        if (quiz) {
-            // Check if user already passed
-            if (quiz.score !== null) {
-                setScore(quiz.score);
-            }
-        }
-    }, [quiz]);
+    // ... existing ...
+
+    // ... existing ...
 
     const handleClaim = async () => {
         if (!quiz?.signature) {
             alert("No signature found. Cannot claim.");
             return;
         }
+
+        // Ensure signature has 0x prefix
+        const signature = quiz.signature.startsWith('0x') ? quiz.signature : `0x${quiz.signature}`;
+
         try {
-            await writeContract({
+            setTxType('CLAIM');
+            const hash = await writeContractAsync({
                 address: CONTRACT_ADDRESS,
-                abi: [
-                    ...CONTRACT_ABI,
-                    {
-                        "inputs": [
-                            { "internalType": "bytes32", "name": "quizId", "type": "bytes32" },
-                            { "internalType": "bytes", "name": "signature", "type": "bytes" }
-                        ],
-                        "name": "withdraw",
-                        "outputs": [],
-                        "stateMutability": "nonpayable",
-                        "type": "function"
-                    }
-                ],
+                abi: CONTRACT_ABI,
                 functionName: 'withdraw',
-                args: [quizIdBytes32, quiz.signature as `0x${string}`],
+                args: [quizIdBytes32, signature as `0x${string}`],
             });
-        } catch (error) {
+            console.log("Claim tx sent:", hash);
+            setTxHash(hash);
+        } catch (error: any) {
             console.error("Claim failed:", error);
-            alert("Failed to claim stake.");
+            setTxType(null);
+            const msg = error?.message || "Transaction rejected or failed";
+            alert(`Failed to claim stake: ${msg}`);
         }
     };
 
     const handleStake = async () => {
         try {
             console.log("Initiating stake for quiz:", quizId);
-            console.log("Quiz ID Bytes32:", quizIdBytes32);
-            await writeContract({
+            setTxType('STAKE');
+            const hash = await writeContractAsync({
                 address: CONTRACT_ADDRESS,
                 abi: CONTRACT_ABI,
                 functionName: 'stake',
                 args: [quizIdBytes32],
-                value: parseEther('0.01'),
+                value: parseEther('0.001'),
             });
-        } catch (error) {
+            console.log("Staking tx sent:", hash);
+            setTxHash(hash);
+        } catch (error: any) {
             console.error("Staking failed:", error);
-            alert("Failed to initiate staking. Check console for details.");
+            setTxType(null);
+            alert(`Failed to initiate staking: ${error?.message || "Unknown error"}`);
         }
     };
 
@@ -210,6 +221,34 @@ export default function QuizPage() {
         }
     };
 
+    const handleRecoverSignature = async () => {
+        try {
+            console.log("Attempting to recover signature...");
+            const token = await getToken();
+            const res = await axios.post(`http://localhost:8000/api/v1/quiz/${quizId}/recover_signature`, {
+                wallet_address: address
+            }, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            console.log("Signature recovered:", res.data);
+            setQuiz(res.data);
+            if (res.data.signature) {
+                // Auto-trigger claim or let user click? Let user click.
+                alert("Signature recovered! You can now claim your stake.");
+            }
+        } catch (error) {
+            console.error("Failed to recover signature", error);
+            // alert("Failed to recover signature. Please try again.");
+        }
+    };
+
+    // Auto-recover if passed but no signature
+    useEffect(() => {
+        if (quiz && quiz.score !== null && quiz.score >= 70 && !quiz.signature && isConnected && address) {
+            handleRecoverSignature();
+        }
+    }, [quiz, isConnected, address]);
+
     if (!mounted) return null;
 
     if (!isConnected) {
@@ -243,7 +282,7 @@ export default function QuizPage() {
                                 disabled={isPending || isConfirming}
                                 className="w-full px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-bold"
                             >
-                                {isPending ? 'Confirm in Wallet...' : isConfirming ? 'Processing Claim...' : 'Claim Stake (0.01 ETH)'}
+                                {isPending ? 'Confirm in Wallet...' : isConfirming ? 'Processing Claim...' : 'Claim Stake (0.001 ETH)'}
                             </button>
                         ) : (
                             // Helper for when signature is missing (e.g. older quiz)
@@ -269,21 +308,30 @@ export default function QuizPage() {
         );
     }
 
+    // ...
+
     // Check if user has staked using on-chain data OR if they supposedly already finished it logic handled above
-    if (!hasStakedOnChain && !isConfirmed) {
+    if (!hasStakedOnChain && !isConfirmed && !localStakeSuccess) {
         return (
             <div className="max-w-md mx-auto mt-10 p-6 bg-white rounded-lg shadow-lg text-center">
+                <div className="mb-4 p-2 bg-yellow-100 text-xs text-left">
+                    <p><strong>Debug Info:</strong></p>
+                    <p>Connected Address: {address?.slice(0, 6)}...</p>
+                    <p>Chain ID: {chainId} (Should be 31337)</p>
+                    <p>Contract: {CONTRACT_ADDRESS.slice(0, 6)}...</p>
+                    <p>Contract Balance: {'0'} ETH</p>
+                </div>
                 <h2 className="text-xl font-bold mb-4">Stake to Start</h2>
                 <p className="text-gray-600 mb-6">
-                    You must stake <strong>0.01 ETH</strong> to attempt this quiz.
-                    <br />Pass (>70%) to get it back!
+                    You must stake <strong>0.001 ETH</strong> to attempt this quiz.
+                    <br />Pass (&gt;70%) to get it back!
                 </p>
                 <button
                     onClick={handleStake}
-                    disabled={isStaking || isConfirming}
+                    disabled={isPending || isConfirming}
                     className="w-full py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
                 >
-                    {isStaking ? 'Confirm in Wallet...' : isConfirming ? 'Staking...' : 'Stake 0.01 ETH'}
+                    {isPending ? 'Confirm in Wallet...' : isConfirming ? 'Staking...' : 'Stake 0.001 ETH'}
                 </button>
             </div>
         );

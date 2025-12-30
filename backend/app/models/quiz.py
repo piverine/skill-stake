@@ -14,6 +14,7 @@ class Quiz(Base):
     score = Column(Integer)
     attempts_count = Column(Integer, default=0)
     is_passed = Column(Boolean, default=False)
+    signature = Column(String, nullable=True) # Hex string of signature
     completed_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     

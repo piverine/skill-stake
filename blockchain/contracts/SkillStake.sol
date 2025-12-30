@@ -8,7 +8,7 @@ pragma solidity ^0.8.19;
 contract SkillStake {
     address public owner;
     address public charityAddress;
-    uint256 public constant STAKE_AMOUNT = 0.01 ether;
+    uint256 public constant STAKE_AMOUNT = 0.001 ether;
 
     // Mapping from Quiz ID to User address to Stake status
     // true = staked, false = not staked or withdrawn
@@ -28,7 +28,7 @@ contract SkillStake {
      * @param quizId The unique identifier of the quiz (hash of PDF + User?).
      */
     function stake(bytes32 quizId) external payable {
-        require(msg.value == STAKE_AMOUNT, "Must stake exactly 0.01 ETH");
+        require(msg.value == STAKE_AMOUNT, "Must stake exactly 0.001 ETH");
         require(!hasStaked[quizId][msg.sender], "Already staked for this quiz");
 
         hasStaked[quizId][msg.sender] = true;

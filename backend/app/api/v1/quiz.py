@@ -1,10 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import uuid
 import logging
 
 from app.core.database import get_db
+from app.core.config import settings
 from app.crud.quiz import quiz_crud
 from app.crud.pdf_upload import pdf_upload_crud
 from app.schemas.quiz import QuizResponse, QuizCreate, QuizSubmission, GeneratedQuiz, QuizValidationResult, QuizGenerationRequest
@@ -349,8 +351,8 @@ async def submit_quiz(
                     from eth_account.messages import encode_defunct
                     import os
                     
-                    # Use a dummy private key if not found (FOR DEVELOPMENT ONLY - Hardhat Account #0)
-                    private_key = os.getenv("SIGNER_PRIVATE_KEY", "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
+                    # Use private key from settings
+                    private_key = settings.PRIVATE_KEY or "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
                     
                     if not submission.wallet_address:
                         logger.warning("No wallet address provided for signing")
@@ -530,3 +532,65 @@ async def regenerate_quiz(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Quiz regeneration failed: {str(e)}"
         )
+
+class SignatureRecoveryRequest(BaseModel):
+    wallet_address: str
+
+@router.post("/{quiz_id}/recover_signature", response_model=QuizResponse)
+async def recover_signature(
+    quiz_id: str,
+    request: SignatureRecoveryRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Recover or regenerate a signature for a passed quiz.
+    Useful if the signature failed to save or for claiming process.
+    """
+    try:
+        from app.models.quiz import Quiz
+        from web3 import Web3
+        from eth_account import Account
+        from eth_account.messages import encode_defunct
+        import os
+        
+        # Verify quiz exists
+        try:
+            quiz_uuid = uuid.UUID(quiz_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid quiz ID")
+            
+        quiz = db.query(Quiz).filter(Quiz.quiz_id == quiz_uuid).first()
+        if not quiz:
+            raise HTTPException(status_code=404, detail="Quiz not found")
+            
+        if not quiz.is_passed:
+            raise HTTPException(status_code=400, detail="Quiz is not passed, cannot generate signature")
+            
+        # Helper to generate signature
+        private_key = settings.PRIVATE_KEY or "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+        
+        quiz_uuid_str = str(uuid.UUID(quiz_id))
+        quiz_id_hash = Web3.keccak(text=quiz_uuid_str)
+        
+        message_hash = Web3.solidity_keccak(
+            ['address', 'bytes32', 'string'],
+            [Web3.to_checksum_address(request.wallet_address), quiz_id_hash, "PASSED"]
+        )
+        
+        signed_message = Account.sign_message(
+            encode_defunct(hexstr=message_hash.hex()),
+            private_key=private_key
+        )
+        
+        quiz.signature = signed_message.signature.hex()
+        db.add(quiz)
+        db.commit()
+        db.refresh(quiz)
+        
+        logger.info(f"Recovered signature for quiz {quiz_id} and user {request.wallet_address}")
+        return quiz
+        
+    except Exception as e:
+        logger.error(f"Error recovering signature: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
