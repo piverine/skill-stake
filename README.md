@@ -123,6 +123,11 @@ The platform uses PostgreSQL with the following main tables:
 8. **Task 8**: Error handling and validation
 9. **Task 9**: Integration and testing
 
+## Links
+
+- LinkedIn post: https://www.linkedin.com/posts/rohan-kumar-3288671a7_hackxios2k25-kiroide-aws-activity-7411821294603739136-fcLr/
+- Blog post: https://medium.com/@darkgods173/web3-meets-edtech-how-i-used-kiro-gemini-to-gamify-learning-334ca19be1c3
+
 ## Contributing
 
 This project follows the spec-driven development methodology. See `.kiro/specs/skill-stake-learning/` for detailed requirements, design, and implementation tasks.
