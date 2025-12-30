@@ -21,8 +21,8 @@ class QuizQuestion(BaseModel):
         v = v.strip()
         if len(v) < 10:
             raise ValueError('Question text must be at least 10 characters after trimming')
-        if not v.endswith('?'):
-            raise ValueError('Question text should end with a question mark')
+        if not v.endswith(('?', ':', '.')):
+            raise ValueError('Question text should end with a question mark, colon, or period')
         return v
     
     @validator('options')
@@ -74,10 +74,14 @@ class QuizBase(BaseModel):
         return v
 
 class QuizCreate(QuizBase):
-    stake_id: str = Field(..., description="Associated stake ID")
+    stake_id: Optional[str] = Field(None, description="Associated stake ID")
+
+class QuizGenerationRequest(BaseModel):
+    stake_id: Optional[str] = Field(None, description="Associated stake ID (optional)")
 
 class QuizSubmission(BaseModel):
     quiz_id: str = Field(..., description="Quiz ID being submitted")
+    wallet_address: Optional[str] = Field(None, description="User wallet address for signing")
     user_answers: List[int] = Field(..., min_items=10, max_items=10, description="User's answers (indices 0-3)")
     
     @validator('user_answers')
@@ -127,7 +131,7 @@ class QuizGenerationError(BaseModel):
     retry_count: int = Field(default=0, description="Number of retry attempts")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "error_type": "AI_PROCESSING_FAILED",
                 "error_message": "Gemini API returned invalid JSON response",
@@ -144,7 +148,7 @@ class QuizValidationResult(BaseModel):
     recommendations: List[str] = Field(default_factory=list, description="Recommendations for improvement")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "is_valid": True,
                 "validation_errors": [],
@@ -156,9 +160,12 @@ class QuizValidationResult(BaseModel):
 class QuizResponse(QuizBase):
     quiz_id: uuid.UUID
     stake_id: uuid.UUID
-    user_answers: Optional[List[int]]
-    score: Optional[int]
-    completed_at: Optional[datetime]
+    user_answers: Optional[List[int]] = None
+    score: Optional[int] = None
+    attempts_count: Optional[int] = None
+    is_passed: Optional[bool] = None
+    signature: Optional[str] = None
+    completed_at: Optional[datetime] = None
     created_at: datetime
     
     class Config:

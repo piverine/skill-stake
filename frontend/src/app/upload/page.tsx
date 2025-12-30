@@ -3,15 +3,17 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { useAuth } from '@clerk/nextjs'
 import AuthWrapper from '@/components/auth/AuthWrapper'
 import { api } from '@/lib/api'
 
 export default function UploadPage() {
     const router = useRouter()
+    const { getToken } = useAuth()
     const [file, setFile] = useState<File | null>(null)
     const [uploading, setUploading] = useState(false)
+    const [statusMessage, setStatusMessage] = useState<string | null>(null)
     const [error, setError] = useState<string | null>(null)
-    const [success, setSuccess] = useState<string | null>(null)
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
@@ -23,7 +25,7 @@ export default function UploadPage() {
             }
             setFile(selectedFile)
             setError(null)
-            setSuccess(null)
+            setStatusMessage(null)
         }
     }
 
@@ -35,32 +37,46 @@ export default function UploadPage() {
 
         setUploading(true)
         setError(null)
-        setSuccess(null)
+        setStatusMessage('Getting secure token...')
 
         const formData = new FormData()
         formData.append('file', file)
 
         try {
-            // Endpoint is /pdf-upload/upload based on typical router structure
-            // Wait, let's verify router prefix. Usually /api/v1/...
-            // In main.py: app.include_router(api_router, prefix=settings.API_V1_STR)
-            // In api.py: api_router.include_router(pdf_upload.router, prefix="/pdf-upload", tags=["pdf-upload"])
-            // In pdf_upload.py: @router.post("/upload")
-            // So full path: /api/v1/pdf-upload/upload
+            // Get fresh token and update localStorage for the interceptor
+            const token = await getToken()
+            if (token) {
+                localStorage.setItem('clerk_token', token)
+            }
 
+            setStatusMessage('Uploading PDF...')
             await api.post('/pdf/upload', formData, {
                 headers: {
                     'Content-Type': 'multipart/form-data',
+                    ...(token ? { Authorization: `Bearer ${token}` } : {})
                 },
             })
 
-            setSuccess('File uploaded successfully! redirecting...')
+            setStatusMessage('File uploaded! Generating quiz...')
+
+            // Generate quiz immediately
+            const freshToken = await getToken()
+            const quizRes = await api.post('/quiz/generate', {
+                stake_id: undefined // Backend will auto-create if missing
+            }, {
+                headers: {
+                    ...(freshToken ? { Authorization: `Bearer ${freshToken}` } : {})
+                }
+            });
+
+            setStatusMessage('Quiz generated! Redirecting...')
             setTimeout(() => {
-                router.push('/dashboard')
-            }, 2000)
+                router.push(`/quiz/${quizRes.data.quiz_id}`)
+            }, 1000)
         } catch (err: any) {
-            console.error('Upload error:', err)
-            setError(err.response?.data?.detail || 'Failed to upload file. Please try again.')
+            console.error('Upload/Generate error:', err)
+            setStatusMessage(null)
+            setError(err.response?.data?.detail || 'Failed to process. Please try again.')
         } finally {
             setUploading(false)
         }
@@ -158,15 +174,15 @@ export default function UploadPage() {
                                     </div>
                                 )}
 
-                                {success && (
-                                    <div className="bg-green-50 p-4 rounded-md">
+                                {statusMessage && (
+                                    <div className="bg-blue-50 p-4 rounded-md">
                                         <div className="flex">
                                             <div className="ml-3">
-                                                <h3 className="text-sm font-medium text-green-800">
-                                                    Success
+                                                <h3 className="text-sm font-medium text-blue-800">
+                                                    Status
                                                 </h3>
-                                                <div className="mt-2 text-sm text-green-700">
-                                                    <p>{success}</p>
+                                                <div className="mt-2 text-sm text-blue-700">
+                                                    <p>{statusMessage}</p>
                                                 </div>
                                             </div>
                                         </div>

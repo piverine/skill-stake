@@ -7,7 +7,7 @@ import logging
 from app.core.database import get_db
 from app.crud.quiz import quiz_crud
 from app.crud.pdf_upload import pdf_upload_crud
-from app.schemas.quiz import QuizResponse, QuizCreate, QuizSubmission, GeneratedQuiz, QuizValidationResult
+from app.schemas.quiz import QuizResponse, QuizCreate, QuizSubmission, GeneratedQuiz, QuizValidationResult, QuizGenerationRequest
 from app.schemas.pdf_upload import ProcessingStatus
 from app.core.auth import get_current_user
 from app.services.quiz_generator import QuizGeneratorService, AIProcessingError
@@ -17,25 +17,50 @@ router = APIRouter()
 
 @router.post("/generate", response_model=QuizResponse, status_code=status.HTTP_201_CREATED)
 async def generate_quiz(
-    quiz_request: QuizCreate,
+    quiz_request: QuizGenerationRequest,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
     """
     Generate a quiz from a processed PDF upload with comprehensive error handling.
     
-    - **stake_id**: ID of the stake associated with this quiz
+    - **stake_id**: ID of the stake associated with this quiz (Optional)
     - Returns generated quiz with 10 questions
     """
     try:
-        # Validate stake_id format
-        try:
-            stake_uuid = uuid.UUID(quiz_request.stake_id)
-        except ValueError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid stake ID format"
-            )
+        # Handle Stake ID
+        stake_id = None
+        if quiz_request.stake_id:
+            # Validate stake_id format
+            try:
+                stake_uuid = uuid.UUID(quiz_request.stake_id)
+                stake_id = quiz_request.stake_id
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid stake ID format"
+                )
+        else:
+            # Create a new PENDING stake
+            try:
+                from app.models.stake import Stake, StakeStatus
+                new_stake = Stake(
+                    user_id=current_user.user_id,
+                    amount_eth=None, # Will be filled when staked
+                    transaction_hash=None,
+                    status=StakeStatus.PENDING
+                )
+                db.add(new_stake)
+                db.commit()
+                db.refresh(new_stake)
+                stake_id = str(new_stake.stake_id)
+                logger.info(f"Created new pending stake {stake_id}")
+            except Exception as e:
+                logger.error(f"Failed to create pending stake: {str(e)}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to initiate staking session"
+                )
         
         # TODO: Validate that stake belongs to current user and is active
         # For now, we'll skip stake validation and focus on PDF processing
@@ -44,10 +69,10 @@ async def generate_quiz(
         try:
             completed_uploads = pdf_upload_crud.get_completed_uploads_by_user(
                 db=db,
-                user_id=current_user["user_id"]
+                user_id=current_user.user_id
             )
         except Exception as e:
-            logger.error(f"Error retrieving PDF uploads for user {current_user['user_id']}: {str(e)}")
+            logger.error(f"Error retrieving PDF uploads for user {current_user.user_id}: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to retrieve PDF uploads"
@@ -142,10 +167,10 @@ async def generate_quiz(
             quiz_record = quiz_crud.create_quiz(
                 db=db,
                 quiz_data=generated_quiz,
-                stake_id=quiz_request.stake_id
+                stake_id=stake_id
             )
             
-            logger.info(f"Successfully created quiz {quiz_record.quiz_id} for stake {quiz_request.stake_id}")
+            logger.info(f"Successfully created quiz {quiz_record.quiz_id} for stake {stake_id}")
             return quiz_record
             
         except ValueError as e:
@@ -315,7 +340,68 @@ async def submit_quiz(
                 score=score
             )
             
+            # Generate signature if passed
+            signature = None
+            if updated_quiz.is_passed:
+                try:
+                    from web3 import Web3
+                    from eth_account import Account
+                    from eth_account.messages import encode_defunct
+                    import os
+                    
+                    # Use a dummy private key if not found (FOR DEVELOPMENT ONLY - Hardhat Account #0)
+                    private_key = os.getenv("SIGNER_PRIVATE_KEY", "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
+                    
+                    if not submission.wallet_address:
+                        logger.warning("No wallet address provided for signing")
+                    else:
+                        # Convert quiz_id (UUID) to simplified bytes32 hex string to match Sol/Frontend
+                        # Frontend: keccak256(toHex(quizId)) -> This is the hash of the hex representation of the string UUID
+                        # Wait, in the frontend I changed logic to:
+                        # const quizIdBytes32 = keccak256(toHex(quizId)); 
+                        # This takes the string "uuid...", converts to hex "0x...", then hashes it.
+                        
+                        # Backend equivalent:
+                        # 1. Take UUID string
+                        # 2. Convert to Hex/Bytes
+                        # 3. Keccak Hash it?
+                        
+                        # Let's align exactly with Frontend logic:
+                        # Frontend `toHex('123')` -> '0x313233'
+                        # Frontend `keccak256('0x313233')` -> hash of valid hex string bytes? NO. 
+                        # viem `toHex` converts string to hex bytes. `keccak256` hashes those bytes.
+                        # So effectively: keccak256(string_bytes).
+                        
+                        quiz_uuid_str = str(uuid.UUID(quiz_id))
+                        quiz_id_hash = Web3.keccak(text=quiz_uuid_str)
+                        
+                        # Message: (user, quizId, "PASSED")
+                        # Solidity: keccak256(abi.encodePacked(msg.sender, quizId, "PASSED"))
+                        # Python: solidity_keccak(['address', 'bytes32', 'string'], ...)
+                        
+                        message_hash = Web3.solidity_keccak(
+                            ['address', 'bytes32', 'string'],
+                            [Web3.to_checksum_address(submission.wallet_address), quiz_id_hash, "PASSED"]
+                        )
+                        
+                        # Sign (EIP-191) using encode_defunct
+                        # Sol: getEthSignedMessageHash wrapper does this prefixing
+                        signed_message = Account.sign_message(
+                            encode_defunct(hexstr=message_hash.hex()),
+                            private_key=private_key
+                        )
+                        
+                        updated_quiz.signature = signed_message.signature.hex()
+                        logger.info(f"Generated signature for {submission.wallet_address}")
+                        
+                except Exception as ex:
+                    logger.error(f"Signing failed: {ex}")
+
             logger.info(f"Successfully submitted quiz {quiz_id} with score {score}")
+            
+            # Temporary: Populate signature field manually on response object if I could?
+            # Schema has it now.
+            
             return updated_quiz
             
         except ValueError as e:
@@ -354,9 +440,20 @@ async def get_user_quizzes(
     - **skip**: Number of records to skip (pagination)
     - **limit**: Maximum number of records to return
     """
-    # TODO: Implement get_by_user_id in quiz_crud
-    # For now, return empty list
-    return []
+    try:
+        quizzes = quiz_crud.get_by_user_id(
+            db=db, 
+            user_id=current_user.user_id,
+            skip=skip,
+            limit=limit
+        )
+        return quizzes
+    except Exception as e:
+        logger.error(f"Error fetching user quizzes: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch user quizzes"
+        )
 
 @router.post("/{quiz_id}/regenerate", response_model=QuizResponse)
 async def regenerate_quiz(
@@ -398,7 +495,7 @@ async def regenerate_quiz(
         # For now, find the most recent completed upload for the user
         completed_uploads = pdf_upload_crud.get_completed_uploads_by_user(
             db=db,
-            user_id=current_user["user_id"]
+            user_id=current_user.user_id
         )
         
         if not completed_uploads:

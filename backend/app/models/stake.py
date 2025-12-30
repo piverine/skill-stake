@@ -1,5 +1,5 @@
-from sqlalchemy import Column, String, DateTime, ForeignKey, Integer, Enum as SQLEnum, DECIMAL
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Column, String, DateTime, ForeignKey, Integer, Enum as SQLEnum, DECIMAL, Uuid
+
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import uuid
@@ -18,10 +18,10 @@ class SettlementType(str, enum.Enum):
 class Stake(Base):
     __tablename__ = "stakes"
     
-    stake_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False)
-    amount_eth = Column(DECIMAL(18, 8), nullable=False)
-    transaction_hash = Column(String(66), nullable=False)
+    stake_id = Column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(Uuid(as_uuid=True), ForeignKey("users.user_id"), nullable=False)
+    amount_eth = Column(DECIMAL(18, 8), nullable=True)
+    transaction_hash = Column(String(66), nullable=True)
     contract_stake_id = Column(Integer)
     status = Column(SQLEnum(StakeStatus), default=StakeStatus.PENDING)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

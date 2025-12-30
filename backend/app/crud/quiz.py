@@ -13,7 +13,16 @@ logger = logging.getLogger(__name__)
 class CRUDQuiz(CRUDBase[Quiz, QuizCreate, dict]):
     def get_by_stake_id(self, db: Session, *, stake_id: str) -> Optional[Quiz]:
         """Get quiz by stake ID."""
-        return db.query(Quiz).filter(Quiz.stake_id == stake_id).first()
+        import uuid
+        if isinstance(stake_id, str):
+            try:
+                stake_id_uuid = uuid.UUID(stake_id)
+            except ValueError:
+                return None
+        else:
+            stake_id_uuid = stake_id
+            
+        return db.query(Quiz).filter(Quiz.stake_id == stake_id_uuid).first()
 
     def get_by_user_id(self, db: Session, *, user_id: str, skip: int = 0, limit: int = 100) -> List[Quiz]:
         """Get all quizzes for a specific user through stakes."""
@@ -38,7 +47,7 @@ class CRUDQuiz(CRUDBase[Quiz, QuizCreate, dict]):
                 raise ValueError(f"Invalid stake ID format: {stake_id}")
             
             # Check if quiz already exists for this stake
-            existing_quiz = self.get_by_stake_id(db, stake_id=stake_id)
+            existing_quiz = self.get_by_stake_id(db, stake_id=str(stake_uuid))
             if existing_quiz:
                 raise ValueError(f"Quiz already exists for stake {stake_id}")
             
@@ -68,7 +77,7 @@ class CRUDQuiz(CRUDBase[Quiz, QuizCreate, dict]):
             
             # Create database record
             db_quiz = Quiz(
-                stake_id=stake_id,
+                stake_id=stake_uuid,
                 questions=questions_data
             )
             
@@ -160,7 +169,8 @@ class CRUDQuiz(CRUDBase[Quiz, QuizCreate, dict]):
                 raise ValueError(f"Quiz {quiz_id} not found")
             
             if quiz.completed_at:
-                raise ValueError("Quiz has already been completed")
+                # If completed (passed or max retries), no more submissions
+                raise ValueError("Quiz has already been completed or max attempts reached")
             
             if len(user_answers) != 10:
                 raise ValueError("Must provide exactly 10 answers")
@@ -184,7 +194,24 @@ class CRUDQuiz(CRUDBase[Quiz, QuizCreate, dict]):
             # Update quiz with answers and score
             quiz.user_answers = user_answers
             quiz.score = score
-            quiz.completed_at = datetime.utcnow()
+            quiz.attempts_count += 1
+            if score >= 70:
+                quiz.is_passed = True
+            
+            # If passed or max attempts reached, mark as completed
+            # Logic: If passed, completed. If failed but attempts < 3, NOT completed (allow retry)?
+            # But the 'submit' endpoint in API handles the flow.
+            # Current logic in API seems to treat 'submit' as final for that attempt.
+            # If we want to allow retries, we shouldn't set completed_at unless passed or max attempts.
+            
+            if quiz.is_passed or quiz.attempts_count >= 3:
+                quiz.completed_at = datetime.utcnow()
+            else:
+                # Reset score/answers if allowing retry?
+                # Or keep them and just allow overwrite?
+                # For simplicity, we just track attempts.
+                # If we want to allow regeneration/retry, we might need to NOT set completed_at.
+                pass
             
             db.add(quiz)
             db.commit()
@@ -430,7 +457,15 @@ class CRUDQuiz(CRUDBase[Quiz, QuizCreate, dict]):
 
     def get(self, db: Session, id: str) -> Optional[Quiz]:
         """Override to use quiz_id field."""
-        return db.query(Quiz).filter(Quiz.quiz_id == id).first()
+        import uuid
+        if isinstance(id, str):
+            try:
+                id_uuid = uuid.UUID(id)
+            except ValueError:
+                return None
+        else:
+            id_uuid = id
+        return db.query(Quiz).filter(Quiz.quiz_id == id_uuid).first()
 
     def remove(self, db: Session, *, id: str) -> Optional[Quiz]:
         """Override to use quiz_id field."""

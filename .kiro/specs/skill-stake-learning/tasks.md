@@ -2,7 +2,9 @@
 
 ## Overview
 
-This implementation plan breaks down the Skill-Stake Learning Platform into discrete coding tasks that build incrementally. The system uses Python FastAPI for the backend, TypeScript Next.js for the frontend, and integrates with Gemini AI, NeonDB, and Ethereum smart contracts. Each task focuses on specific functionality while maintaining integration with previously implemented components.
+This implementation plan breaks down the enhanced Skill-Stake Learning Platform into discrete coding tasks that build incrementally. The system now includes a comprehensive blockchain integration using a "Server-Signed Oracle" pattern where users stake ETH directly to a smart contract, take AI-generated quizzes with a maximum of 3 attempts, and either recover their stake (>70% score) or have it donated to charity (failed after 3 attempts). The backend validates quiz scores and provides server-signed authorization for smart contract settlements.
+
+The enhanced system uses Python FastAPI for the backend, TypeScript Next.js with wagmi/viem for Web3 frontend integration, Solidity smart contracts deployed on Hardhat/testnet, and integrates with Gemini AI and NeonDB. Each task focuses on specific functionality while maintaining integration with previously implemented components.
 
 ## Tasks
 
@@ -77,7 +79,7 @@ This implementation plan breaks down the Skill-Stake Learning Platform into disc
     - **Property 2: PDF Processing Round Trip**
     - **Validates: Requirements 2.1, 2.2, 2.3, 2.5**
 
-  - [-] 5.4 Implement quiz data validation and storage
+  - [ ] 5.4 Implement quiz data validation and storage
     - Add Pydantic schema validation for generated quizzes
     - Implement quiz storage with proper database relationships
     - Add error handling for AI processing failures
@@ -92,116 +94,169 @@ This implementation plan breaks down the Skill-Stake Learning Platform into disc
     - Test error handling for AI API failures
     - _Requirements: 2.4, 8.2_
 
-- [ ] 6. Implement smart contract and blockchain integration
-  - [ ] 6.1 Create Solidity escrow smart contract
-    - Write escrow contract with stake creation and settlement functions
-    - Implement charity donation functionality
-    - Add emergency withdrawal and admin functions
-    - Deploy contract to Sepolia testnet
+- [-] 6. Create smart contract infrastructure
+  - [ ] 6.1 Set up Hardhat development environment
+    - Initialize Hardhat project in /contracts directory
+    - Configure local network and testnet deployment scripts
+    - Set up contract compilation and testing framework
+    - Add environment configuration for different networks
+    - _Requirements: 3.1, 3.4_
+
+  - [ ] 6.2 Create SkillStake Solidity smart contract
+    - Write SkillStake.sol contract with stake mapping (user => stakeAmount, user => attempts)
+    - Implement stake(bytes32 quizId) payable function for ETH deposits
+    - Add submitResult(bytes32 quizId, bool passed, bytes signature) for backend-authorized settlements
+    - Include forfeitStake() and returnStake() functions for backend-controlled outcomes
+    - Add events for stake creation, settlement, and charity donations
     - _Requirements: 3.1, 3.4, 6.1, 6.2_
 
-  - [ ] 6.2 Implement Web3 integration in FastAPI backend
+  - [ ] 6.3 Write smart contract unit tests
+    - Test stake creation and ETH locking functionality
+    - Test server-signed settlement authorization and signature verification
+    - Test charity donation logic and emergency withdrawal functions
+    - Test access control and security measures
+    - _Requirements: 3.1, 3.4, 6.1, 6.2_
+
+  - [ ] 6.4 Deploy contract to local/testnet
+    - Create deployment scripts for local Hardhat network
+    - Deploy to testnet (Sepolia) with proper configuration
+    - Verify contract on block explorer and document addresses
+    - _Requirements: 3.1, 3.4_
+
+- [ ] 7. Implement Web3 integration and blockchain connectivity
+- [ ] 7. Implement Web3 integration and blockchain connectivity
+  - [ ] 7.1 Set up Web3 provider and wallet integration in frontend
+    - Install and configure wagmi and viem for wallet connections
+    - Create Web3Provider component for wallet state management
+    - Implement MetaMask connection and network switching
+    - Add wallet balance display and transaction status monitoring
+    - _Requirements: 3.1, 3.3_
+
+  - [ ] 7.2 Implement Web3 integration in FastAPI backend
     - Set up web3.py client for Ethereum interaction
-    - Create contract interaction functions (stake, settle, withdraw)
-    - Implement transaction monitoring and confirmation
+    - Create contract interaction functions (verify stakes, call settlements)
+    - Implement server-signed oracle pattern for quiz result authorization
+    - Add transaction monitoring and confirmation logic
     - _Requirements: 3.1, 3.2, 8.3_
 
-  - [ ] 6.3 Write property test for staking workflow
+  - [ ] 7.3 Write property test for staking workflow
     - **Property 3: Staking Workflow Integrity**
     - **Validates: Requirements 3.1, 3.2, 3.3, 3.4**
 
-  - [ ] 6.4 Implement blockchain integration in Next.js frontend
-    - Add Web3 wallet connection (MetaMask integration)
-    - Create staking interface components
-    - Implement transaction status monitoring
-    - _Requirements: 3.1, 3.3_
-
-  - [ ] 6.5 Write unit tests for blockchain integration
+  - [ ] 7.4 Write unit tests for blockchain integration
     - Test smart contract interactions with test network
-    - Test transaction failure scenarios
+    - Test server-signed authorization and signature verification
+    - Test transaction failure scenarios and recovery
     - _Requirements: 3.1, 3.4, 8.3_
 
-- [ ] 7. Checkpoint - Ensure core functionality tests pass
+- [ ] 8. Checkpoint - Ensure blockchain integration tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 8. Implement quiz taking and scoring system
-  - [ ] 8.1 Create quiz API endpoints
-    - Implement quiz retrieval and submission endpoints
-    - Add quiz access control based on stake status
-    - Create scoring calculation logic
+- [ ] 9. Implement quiz taking and scoring system with attempt tracking
+  - [ ] 9.1 Update Quiz model to track attempts and stake relationship
+    - Modify Quiz model to include attempts_count (default 0), is_passed boolean, stake_tx_hash
+    - Update database schema to support multiple quiz attempts per stake
+    - Add QuizAttempt model to track individual attempt sessions
     - _Requirements: 5.2, 5.4, 3.3_
 
-  - [ ] 8.2 Write property test for scoring accuracy
-    - **Property 5: Scoring Calculation Accuracy**
+  - [ ] 9.2 Create enhanced quiz API endpoints with staking verification
+    - Implement POST /quiz/{id}/start endpoint to verify on-chain stake before allowing quiz access
+    - Update quiz retrieval to check active stake status via blockchain provider
+    - Add attempt session management and attempt count validation
+    - _Requirements: 5.2, 5.4, 3.3_
+
+  - [ ] 9.3 Implement quiz submission with attempt tracking and settlement logic
+    - Update POST /quiz/{id}/submit to handle scoring and attempt increment
+    - Add logic for score >= 70%: mark passed and generate backend signature for withdrawal
+    - Add logic for score < 70%: increment attempts, trigger charity donation if attempts >= 3
+    - Implement server-signed authorization for smart contract settlement calls
+    - _Requirements: 5.2, 5.4, 6.1, 6.2_
+
+  - [ ] 9.4 Write property test for scoring accuracy with attempt tracking
+    - **Property 5: Scoring Calculation Accuracy with Attempt Management**
     - **Validates: Requirements 5.2, 5.4**
 
-  - [ ] 8.3 Implement quiz interface in Next.js frontend
-    - Create quiz display components
-    - Implement answer submission and result display
-    - Add progress tracking and timer functionality
+  - [ ] 9.5 Create enhanced quiz interface with staking integration
+    - Add "Stake 0.01 ETH to Start" button when no active stake detected
+    - Implement question display with attempt counter (e.g., "Attempt 1 of 3")
+    - Add optional timer functionality for quiz sessions
+    - Display immediate results with stake outcome (returned/donated)
     - _Requirements: 5.2, 5.4_
 
-  - [ ] 8.4 Write unit tests for quiz functionality
-    - Test quiz access control and scoring logic
-    - Test quiz completion and result storage
+  - [ ] 9.6 Write unit tests for enhanced quiz functionality
+    - Test quiz access control based on blockchain stake verification
+    - Test attempt counting and maximum attempt enforcement
+    - Test scoring logic with settlement trigger scenarios
     - _Requirements: 5.2, 5.4_
 
-- [ ] 9. Implement settlement and payout system
-  - [ ] 9.1 Create settlement logic and API endpoints
-    - Implement automatic settlement trigger after quiz completion
-    - Add settlement status tracking and database updates
-    - Create manual settlement resolution for failed transactions
+- [ ] 10. Implement server-signed settlement and payout system
+  - [ ] 10.1 Create server-signed oracle settlement logic
+    - Implement backend signature generation for quiz result authorization
+    - Add automatic settlement trigger after quiz completion with server authorization
+    - Create returnStake() and forfeitStake() contract calls with backend signatures
+    - Add settlement status tracking with transaction hash storage
     - _Requirements: 6.1, 6.2, 6.3, 6.4_
 
-  - [ ] 9.2 Write property test for settlement logic
-    - **Property 6: Settlement Logic Correctness**
+  - [ ] 10.2 Implement charity donation logic for failed attempts
+    - Add pre-defined charity address configuration
+    - Implement automatic charity transfer when attempts >= 3 and score < 70%
+    - Add charity donation tracking and receipt generation
+    - Create transparency features for charity donation history
+    - _Requirements: 6.2, 6.3_
+
+  - [ ] 10.3 Write property test for settlement logic with attempt tracking
+    - **Property 6: Settlement Logic Correctness with Attempt Management**
     - **Validates: Requirements 6.1, 6.2, 6.3**
 
-  - [ ] 9.3 Implement settlement monitoring and error handling
-    - Add transaction monitoring for settlement operations
-    - Implement retry logic for failed settlements
-    - Create admin tools for manual intervention
+  - [ ] 10.4 Implement settlement monitoring and error recovery
+    - Add transaction monitoring for server-authorized settlements
+    - Implement retry logic for failed settlement transactions
+    - Create admin tools for manual settlement intervention
+    - Add settlement audit trail and logging
     - _Requirements: 6.4, 8.2_
 
-  - [ ] 9.4 Write unit tests for settlement system
-    - Test settlement logic with various score scenarios
+  - [ ] 10.5 Write unit tests for enhanced settlement system
+    - Test server signature generation and verification
+    - Test settlement logic with various score and attempt scenarios
+    - Test charity donation triggers and transaction handling
     - Test error handling and recovery procedures
     - _Requirements: 6.1, 6.2, 6.3, 6.4_
 
-- [ ] 10. Implement comprehensive error handling and validation
-  - [ ] 10.1 Add API input validation and error responses
+- [ ] 11. Implement comprehensive error handling and validation
+  - [ ] 11.1 Add API input validation and error responses
     - Implement comprehensive Pydantic validation for all endpoints
     - Add standardized error response format
     - Create error logging and monitoring
     - _Requirements: 8.4, 2.4, 6.4_
 
-  - [ ] 10.2 Write property test for API validation
+  - [ ] 11.2 Write property test for API validation
     - **Property 8: API Input Validation**
     - **Validates: Requirements 8.1, 8.2, 8.3, 8.4**
 
-  - [ ] 10.3 Write property test for error handling
+  - [ ] 11.3 Write property test for error handling
     - **Property 9: Error Handling Consistency**
     - **Validates: Requirements 2.4, 6.4, 8.2**
 
-  - [ ] 10.4 Implement frontend error handling and user feedback
+  - [ ] 11.4 Implement frontend error handling and user feedback
     - Add error boundary components for React
     - Implement user-friendly error messages and recovery options
     - Create loading states and progress indicators
     - _Requirements: 2.4, 6.4_
 
-- [ ] 11. Integration and end-to-end testing
-  - [ ] 11.1 Wire all components together
+- [ ] 12. Integration and end-to-end testing
+  - [ ] 12.1 Wire all components together
     - Connect frontend and backend with complete API integration
-    - Implement end-to-end user workflows
+    - Implement end-to-end user workflows with blockchain integration
     - Add comprehensive logging and monitoring
     - _Requirements: 8.1, 8.2, 8.3_
 
-  - [ ] 11.2 Write integration tests for complete workflows
+  - [ ] 12.2 Write integration tests for complete workflows
     - Test complete user journey from registration to settlement
     - Test cross-service communication and error propagation
+    - Test blockchain integration across all components
     - _Requirements: All requirements_
 
-- [ ] 12. Final checkpoint - Ensure all tests pass and system is functional
+- [ ] 13. Final checkpoint - Ensure all tests pass and system is functional
   - Ensure all tests pass, ask the user if questions arise.
 
 ## Notes
@@ -211,4 +266,6 @@ This implementation plan breaks down the Skill-Stake Learning Platform into disc
 - Checkpoints ensure incremental validation and allow for user feedback
 - Property tests validate universal correctness properties across all inputs
 - Unit tests validate specific examples, edge cases, and error conditions
-- The implementation follows a layered approach: infrastructure → authentication → data → AI → blockchain → UI → integration
+- The implementation follows a layered approach: infrastructure → authentication → data → AI → smart contracts → Web3 integration → enhanced quiz system → settlement → integration
+- New blockchain components include: Hardhat setup, SkillStake.sol contract, wagmi/viem Web3 integration, server-signed oracle pattern, and attempt tracking
+- The system now supports a maximum of 3 quiz attempts per stake with automatic charity donation for failures

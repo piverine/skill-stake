@@ -20,7 +20,7 @@ class AIProcessingError(Exception):
         self.retry_count = retry_count
 
 class QuizGeneratorService:
-    """Service for generating quizzes from PDF content using Gemini 3 Flash API."""
+    """Service for generating quizzes from PDF content using Gemini 2.0 Flash API."""
     
     def __init__(self):
         """Initialize the quiz generator with Gemini API configuration."""
@@ -28,7 +28,7 @@ class QuizGeneratorService:
             raise ValueError("GEMINI_API_KEY is required for quiz generation")
         
         genai.configure(api_key=settings.GEMINI_API_KEY)
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
         self.max_retries = 3
         self.base_delay = 1.0  # Base delay for exponential backoff
     
@@ -74,28 +74,58 @@ class QuizGeneratorService:
                 # Create the prompt for quiz generation
                 prompt = self._create_quiz_generation_prompt(cleaned_text)
                 
-                # Generate quiz using Gemini API with timeout
+                # Function to try generation with a specific model
+                async def generate_with_model(model_name: str, current_prompt: str, retries: int = 3):
+                    current_model = genai.GenerativeModel(model_name)
+                    
+                    for attempt in range(retries):
+                        try:
+                            logger.info(f"Attempting quiz generation with model {model_name} (attempt {attempt+1}/{retries})")
+                            response = await asyncio.wait_for(
+                                asyncio.to_thread(current_model.generate_content, current_prompt),
+                                timeout=60.0
+                            )
+                            
+                            if not response or not hasattr(response, 'text') or not response.text:
+                                raise AIProcessingError(
+                                    "No response received from Gemini API",
+                                    error_type="EMPTY_RESPONSE"
+                                )
+                            
+                            return response.text
+
+                        except asyncio.TimeoutError:
+                            if attempt == retries - 1:
+                                raise AIProcessingError("Gemini API request timed out", error_type="API_TIMEOUT")
+                            
+                        except Exception as e:
+                            error_str = str(e)
+                            if "429" in error_str or "quota" in error_str.lower():
+                                wait_time = 2 ** (attempt + 1) + 1
+                                logger.warning(f"Rate limit hit for {model_name}, waiting {wait_time}s before retry")
+                                await asyncio.sleep(wait_time)
+                            else:
+                                if attempt == retries - 1:
+                                    raise e
+
+                    raise AIProcessingError(f"Failed to generate quiz with {model_name} after retries", error_type="GENERATION_FAILED")
+
+                # Try primary model first, then fallback
+                quiz_response_text = None
                 try:
-                    response = await asyncio.wait_for(
-                        asyncio.to_thread(self.model.generate_content, prompt),
-                        timeout=60.0  # 60 second timeout
-                    )
-                except asyncio.TimeoutError:
-                    raise AIProcessingError(
-                        "Gemini API request timed out",
-                        error_type="API_TIMEOUT",
-                        retry_count=retry_count
-                    )
-                
-                if not response or not hasattr(response, 'text') or not response.text:
-                    raise AIProcessingError(
-                        "No response received from Gemini API",
-                        error_type="EMPTY_RESPONSE",
-                        retry_count=retry_count
-                    )
+                    quiz_response_text = await generate_with_model('gemini-3-flash-preview', prompt)
+                except Exception as e:
+                    logger.warning(f"Primary model failed for quiz generation: {str(e)}. Falling back to gemini-1.5-flash")
+                    try:
+                        quiz_response_text = await generate_with_model('gemini-1.5-flash', prompt)
+                    except Exception as fallback_error:
+                        raise AIProcessingError(
+                            f"Quiz generation failed with both models. Last error: {str(fallback_error)}",
+                            error_type="GENERATION_FAILED"
+                        )
                 
                 # Parse the JSON response
-                quiz_data = self._parse_quiz_response(response.text)
+                quiz_data = self._parse_quiz_response(quiz_response_text)
                 
                 # Validate and create quiz questions
                 questions = self._validate_and_create_questions(quiz_data)
@@ -458,17 +488,48 @@ class QuizGeneratorService:
             - Ensure the JSON is valid and properly formatted
             """
             
-            # Generate quiz using modified prompt
-            response = await asyncio.to_thread(
-                self.model.generate_content,
-                variation_prompt
-            )
-            
-            if not response.text:
-                raise Exception("No response received from Gemini API")
+            # Function to try generation with a specific model
+            async def generate_with_model(model_name: str, current_prompt: str, retries: int = 3):
+                current_model = genai.GenerativeModel(model_name)
+                
+                for attempt in range(retries):
+                    try:
+                        logger.info(f"Attempting quiz regeneration with model {model_name} (attempt {attempt+1}/{retries})")
+                        response = await asyncio.to_thread(
+                            current_model.generate_content,
+                            current_prompt
+                        )
+                        
+                        if not response.text:
+                            raise Exception("No response received from Gemini API")
+                        
+                        return response.text
+
+                    except Exception as e:
+                        error_str = str(e)
+                        if "429" in error_str or "quota" in error_str.lower():
+                            wait_time = 2 ** (attempt + 1) + 1
+                            logger.warning(f"Rate limit hit for {model_name}, waiting {wait_time}s before retry")
+                            await asyncio.sleep(wait_time)
+                        else:
+                            if attempt == retries - 1:
+                                raise e
+
+                raise Exception(f"Failed to regenerate quiz with {model_name} after retries")
+
+            # Try primary model first, then fallback
+            quiz_response_text = None
+            try:
+                quiz_response_text = await generate_with_model('gemini-3-flash-preview', variation_prompt)
+            except Exception as e:
+                logger.warning(f"Primary model failed for quiz regeneration: {str(e)}. Falling back to gemini-1.5-flash")
+                try:
+                    quiz_response_text = await generate_with_model('gemini-1.5-flash', variation_prompt)
+                except Exception as fallback_error:
+                    raise Exception(f"Quiz regeneration failed with both models. Last error: {str(fallback_error)}")
             
             # Parse and validate
-            quiz_data = self._parse_quiz_response(response.text)
+            quiz_data = self._parse_quiz_response(quiz_response_text)
             questions = self._validate_and_create_questions(quiz_data)
             
             generated_quiz = GeneratedQuiz(

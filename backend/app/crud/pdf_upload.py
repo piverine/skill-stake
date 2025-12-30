@@ -8,6 +8,14 @@ from app.schemas.pdf_upload import PDFUploadCreate, PDFUploadUpdate
 class CRUDPDFUpload(CRUDBase[PDFUpload, PDFUploadCreate, PDFUploadUpdate]):
     def get_by_user_id(self, db: Session, *, user_id: str, skip: int = 0, limit: int = 100) -> List[PDFUpload]:
         """Get all PDF uploads for a specific user."""
+        # Ensure user_id is UUID
+        import uuid
+        if isinstance(user_id, str):
+            try:
+                user_id = uuid.UUID(user_id)
+            except ValueError:
+                return []
+                
         return (
             db.query(PDFUpload)
             .filter(PDFUpload.user_id == user_id)
@@ -47,6 +55,15 @@ class CRUDPDFUpload(CRUDBase[PDFUpload, PDFUploadCreate, PDFUploadUpdate]):
             raise ValueError("Only PDF files are allowed")
         
         upload_data = upload_in.dict()
+        
+        # Ensure user_id is UUID
+        import uuid
+        if isinstance(user_id, str):
+            try:
+                user_id = uuid.UUID(user_id)
+            except ValueError:
+                pass # Let it fail later or handle as needed, but try conversion first
+        
         upload_data['user_id'] = user_id
         
         db_upload = PDFUpload(**upload_data)
@@ -64,6 +81,14 @@ class CRUDPDFUpload(CRUDBase[PDFUpload, PDFUploadCreate, PDFUploadUpdate]):
         extracted_text: Optional[str] = None
     ) -> Optional[PDFUpload]:
         """Update processing status and extracted text."""
+        # Convert string ID to UUID for query
+        import uuid
+        if isinstance(upload_id, str):
+            try:
+                upload_id = uuid.UUID(upload_id)
+            except ValueError:
+                return None
+                
         upload = self.get(db, upload_id)
         if not upload:
             return None
@@ -83,6 +108,14 @@ class CRUDPDFUpload(CRUDBase[PDFUpload, PDFUploadCreate, PDFUploadUpdate]):
 
     def get_completed_uploads_by_user(self, db: Session, *, user_id: str) -> List[PDFUpload]:
         """Get all completed PDF uploads for a user."""
+        # Ensure user_id is UUID
+        import uuid
+        if isinstance(user_id, str):
+            try:
+                user_id = uuid.UUID(user_id)
+            except ValueError:
+                return []
+
         return (
             db.query(PDFUpload)
             .filter(PDFUpload.user_id == user_id)
@@ -128,10 +161,26 @@ class CRUDPDFUpload(CRUDBase[PDFUpload, PDFUploadCreate, PDFUploadUpdate]):
 
     def get(self, db: Session, id: str) -> Optional[PDFUpload]:
         """Override to use upload_id field."""
+        # Convert string ID to UUID for query
+        import uuid
+        if isinstance(id, str):
+            try:
+                id = uuid.UUID(id)
+            except ValueError:
+                return None
+                
         return db.query(PDFUpload).filter(PDFUpload.upload_id == id).first()
 
     def remove(self, db: Session, *, id: str) -> Optional[PDFUpload]:
         """Override to use upload_id field."""
+        # Convert string ID to UUID for query
+        import uuid
+        if isinstance(id, str):
+            try:
+                id = uuid.UUID(id)
+            except ValueError:
+                return None
+
         obj = db.query(PDFUpload).filter(PDFUpload.upload_id == id).first()
         if obj:
             db.delete(obj)

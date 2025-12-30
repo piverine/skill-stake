@@ -69,7 +69,7 @@ async def upload_pdf(
         upload_record = pdf_upload_crud.create_upload(
             db=db,
             upload_in=upload_data,
-            user_id=current_user["user_id"]
+            user_id=current_user.user_id
         )
         
         # Save file to disk
@@ -139,7 +139,7 @@ async def get_user_uploads(
     """
     uploads = pdf_upload_crud.get_by_user_id(
         db=db,
-        user_id=current_user["user_id"],
+        user_id=current_user.user_id,
         skip=skip,
         limit=limit
     )
@@ -173,7 +173,7 @@ async def get_upload_status(
         )
     
     # Ensure user can only access their own uploads
-    if str(upload.user_id) != current_user["user_id"]:
+    if str(upload.user_id) != str(current_user.user_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied"
@@ -209,7 +209,7 @@ async def delete_upload(
         )
     
     # Ensure user can only delete their own uploads
-    if str(upload.user_id) != current_user["user_id"]:
+    if str(upload.user_id) != str(current_user.user_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied"
@@ -242,6 +242,6 @@ async def get_upload_statistics(
     """
     stats = pdf_upload_crud.get_upload_statistics_by_user(
         db=db,
-        user_id=current_user["user_id"]
+        user_id=current_user.user_id
     )
     return stats

@@ -8,7 +8,7 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 class PDFProcessorService:
-    """Service for processing PDF files using Gemini 3 Flash API."""
+    """Service for processing PDF files using Gemini 2.0 Flash API."""
     
     def __init__(self):
         """Initialize the PDF processor with Gemini API configuration."""
@@ -16,11 +16,11 @@ class PDFProcessorService:
             raise ValueError("GEMINI_API_KEY is required for PDF processing")
         
         genai.configure(api_key=settings.GEMINI_API_KEY)
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
     
     async def extract_text_from_pdf(self, file_path: Path) -> str:
         """
-        Extract text content from a PDF file using Gemini 3 Flash multimodal capabilities.
+        Extract text content from a PDF file using Gemini 2.0 Flash multimodal capabilities.
         
         Args:
             file_path: Path to the PDF file
@@ -53,16 +53,52 @@ class PDFProcessorService:
             Do not include any commentary or analysis, just the raw text content.
             """
             
-            # Process PDF with Gemini API
-            response = await asyncio.to_thread(
-                self.model.generate_content,
-                [prompt, pdf_file]
-            )
-            
-            if not response.text:
-                raise Exception("No text content extracted from PDF")
-            
-            extracted_text = response.text.strip()
+            # Function to try generation with a specific model
+            async def generate_with_model(model_name: str, retries: int = 3) -> str:
+                current_model = genai.GenerativeModel(model_name)
+                last_error = None
+                
+                for attempt in range(retries):
+                    try:
+                        logger.info(f"Attempting PDF processing with model {model_name} (attempt {attempt+1}/{retries})")
+                        response = await asyncio.to_thread(
+                            current_model.generate_content,
+                            [prompt, pdf_file]
+                        )
+                        
+                        if not response.text:
+                            raise Exception("No text content extracted from PDF")
+                            
+                        return response.text
+                        
+                    except Exception as e:
+                        last_error = e
+                        error_str = str(e)
+                        
+                        # Check for quota exceeded or rate limit errors
+                        if "429" in error_str or "quota" in error_str.lower():
+                            wait_time = 2 ** (attempt + 1) + 1  # Exponential backoff
+                            logger.warning(f"Rate limit hit for {model_name}, waiting {wait_time}s before retry")
+                            await asyncio.sleep(wait_time)
+                        else:
+                            # For other errors, maybe don't retry as aggressively or re-raise
+                            logger.warning(f"Error with {model_name}: {error_str}")
+                
+                raise last_error
+
+            # Try primary model (gemini-3-flash-preview) first
+            try:
+                extracted_text = await generate_with_model('gemini-3-flash-preview')
+            except Exception as e:
+                logger.warning(f"Primary model failed: {str(e)}. Falling back to gemini-1.5-flash")
+                try:
+                    # Fallback to gemini-1.5-flash
+                    extracted_text = await generate_with_model('gemini-1.5-flash')
+                except Exception as fallback_error:
+                    logger.error(f"Fallback model also failed: {str(fallback_error)}")
+                    raise Exception(f"PDF processing failed with both models. Last error: {str(fallback_error)}")
+
+            extracted_text = extracted_text.strip()
             
             # Validate extracted text
             if len(extracted_text) < 10:

@@ -78,7 +78,8 @@ class ClerkJWTVerifier:
                 token,
                 signing_key,
                 algorithms=["RS256"],
-                options={"verify_exp": True, "verify_aud": False}
+                options={"verify_exp": True, "verify_aud": False},
+                leeway=60
             )
             
             return payload
@@ -112,6 +113,7 @@ async def get_current_user(
     """
     try:
         # Verify token with Clerk
+        print(f"Verifying token: {credentials.credentials[:10]}...")
         payload = await clerk_verifier.verify_token(credentials.credentials)
         
         # Extract user ID from token
@@ -140,6 +142,9 @@ async def get_current_user(
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
+        print(f"Auth Error: {str(e)}")
+        traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Authentication failed: {str(e)}"
